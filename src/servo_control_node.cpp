@@ -4,9 +4,6 @@
 #include <std_msgs/Float32.h>
 #include <sensor_msgs/Imu.h>
 
-#include <boost/thread/thread.hpp>
-#include <atomic>
-
 extern "C"
 {
 #include "rc_usefulincludes.h"
@@ -63,23 +60,34 @@ void signal_handler(__attribute__ ((unused)) int dummy)
 }
 
 int frequency;
-std::atomic<int> data[8];
-
+int data[8];
+int loops_missed = 0;
 
 void callback(const servo_control::Servo msg)
 {
     for (int i=0; i < CHANNELS; i++)
+    {
+        loops_missed = 0;
         data[i] = msg.channels[i];
+    }
 }
 
 
 void update_servos()
 {
-  while(ros::ok()){
-    for (int i=0; i < CHANNELS; i++)
-        rc_send_servo_pulse_us(i+1, data[i]);
+    if (loops_missed < 50)
+    {
+        for (int i=0; i < CHANNELS; i++)
+            rc_send_servo_pulse_us(i+1, data[i]);
+    }
+    else
+    {
+        for (int i=0; i < CHANNELS; i++)
+            rc_send_servo_pulse_us(i+1, 1500); //set stop   
+    }
+  
     rc_usleep(1000000/50);
-  }
+    loops_missed++;
 }
 
 
@@ -123,14 +131,12 @@ int main(int argc, char **argv)
     return -1;
   } 
 
-  boost::thread thread_servo(update_servos);
-
   ROS_INFO("Begin loop");
   int counter = 0;
 
-
   ros::Rate loop_rate(10);
    while(ros::ok()){
+    update_servos();
     imu.publishImu();
     ros::spinOnce();
     loop_rate.sleep();
@@ -143,7 +149,5 @@ int main(int argc, char **argv)
   rc_cleanup();
   ros::shutdown();
   
-  thread_servo.join();
-
   return EXIT_SUCCESS;
 }
